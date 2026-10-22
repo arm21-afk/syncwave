@@ -1,0 +1,7 @@
+node_modules
+.next
+.env
+.git
+test-results
+playwright-report
+*.tsbuildinfo

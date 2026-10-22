@@ -1,0 +1,19 @@
+# Use this Blueprint when the contents of syncwave/ are the repository root.
+services:
+  - type: web
+    name: syncwave
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: '24'
+      - key: NODE_ENV
+        value: production
+      - key: APP_ORIGIN
+        fromService:
+          type: web
+          name: syncwave
+          envVarKey: RENDER_EXTERNAL_URL
