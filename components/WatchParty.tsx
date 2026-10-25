@@ -21,7 +21,6 @@ import {
   Play,
   Plus,
   Radio,
-  Send,
   Settings2,
   ShieldCheck,
   SkipBack,
@@ -45,6 +44,9 @@ import {
 import { ClockEstimator } from '../lib/sync';
 import { videoId } from '../lib/youtube';
 import { YouTubePlayer, type Diagnostics, type PlayerHandle } from './YouTubePlayer';
+import { useRoomChat } from './useRoomChat';
+import { ChatPanel } from './ChatPanel';
+import { ChatNotifications } from './ChatNotifications';
 
 const suggestions = [
   {
@@ -75,6 +77,7 @@ export function WatchParty() {
   const socket = useRef<Socket<ServerEvents, ClientEvents> | null>(null),
     stateRef = useRef<RoomState | null>(null),
     session = useRef<Session | null>(null),
+    targetRoom = useRef<string | null>(null),
     player = useRef<PlayerHandle>(null),
     clock = useRef(new ClockEstimator());
   const [state, setState] = useState<RoomState | null>(null),
@@ -91,7 +94,6 @@ export function WatchParty() {
     [error, setError] = useState(''),
     [toast, setToast] = useState(''),
     [url, setUrl] = useState(''),
-    [chat, setChat] = useState(''),
     [tab, setTab] = useState<'queue' | 'chat'>('queue'),
     [debug, setDebug] = useState(false),
     [tolerance, setTolerance] = useState(0.25),
@@ -108,8 +110,18 @@ export function WatchParty() {
     [titles, setTitles] = useState<Record<string, string>>({}),
     [reaction, setReaction] = useState('');
   const pending = useRef(false),
-    chatEnd = useRef<HTMLDivElement>(null);
+    chatPanel = useRef<HTMLElement>(null);
+  const {
+    messages: chatMessages,
+    notifications: chatNotifications,
+    preferences: chatPreferences,
+    seed: seedChat,
+    receive: receiveChat,
+    clear: clearChat,
+    updatePreferences: updateChatPreferences,
+  } = useRoomChat();
   const accept = useCallback((s: RoomState) => {
+    if (s.id !== targetRoom.current) return;
     if (
       !stateRef.current ||
       s.id !== stateRef.current.id ||
@@ -126,6 +138,7 @@ export function WatchParty() {
       if (!s) return;
       setBusy(true);
       setError('');
+      targetRoom.current = data.roomId;
       s.timeout(7000).emit('join', data, (err: Error | null, reply: Reply) => {
         setBusy(false);
         if (err || !reply?.ok) {
@@ -136,6 +149,7 @@ export function WatchParty() {
         session.current = data;
         setJoined(true);
         setPid(reply.participantId!);
+        seedChat(data.roomId, reply.participantId!, reply.state!.messages);
         accept(reply.state!);
         setDialog(null);
         setPassword('');
@@ -143,7 +157,7 @@ export function WatchParty() {
         history.replaceState(null, '', `/?room=${data.roomId}`);
       });
     },
-    [accept],
+    [accept, seedChat],
   );
   useEffect(() => {
     setName(localStorage.getItem('syncwave-name') || '');
@@ -183,11 +197,13 @@ export function WatchParty() {
       setConnected(false);
       setJoined(false);
       pending.current = false;
+      clearChat();
     });
     s.on('connect_error', () =>
       setError('Could not connect. Check your connection and the server origin settings.'),
     );
     s.on('state', accept);
+    s.on('chat:message', receiveChat);
     s.on('reaction', (data) => {
       setReaction(`${data.emoji} ${data.name}`);
     });
@@ -207,7 +223,7 @@ export function WatchParty() {
       s.disconnect();
       socket.current = null;
     };
-  }, [accept, join]);
+  }, [accept, join, receiveChat, clearChat]);
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(''), 4500);
@@ -218,9 +234,6 @@ export function WatchParty() {
     const t = setTimeout(() => setReaction(''), 2500);
     return () => clearTimeout(t);
   }, [reaction]);
-  useEffect(() => {
-    chatEnd.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }, [state?.messages.length, tab]);
   useEffect(() => {
     const ids = state?.queue.map((q) => q.videoId).filter((id) => !titles[id]) ?? [];
     if (!ids.length) return;
@@ -355,6 +368,8 @@ export function WatchParty() {
   const leave = () => {
     socket.current?.emit('leave', () => {});
     session.current = null;
+    targetRoom.current = null;
+    seedChat('', '', []);
     stateRef.current = null;
     setState(null);
     setJoined(false);
@@ -366,15 +381,28 @@ export function WatchParty() {
   const title = current
     ? titles[current.videoId] || current.title
     : 'The best nights start with a play.';
-  const submitChat = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!chat.trim()) return;
-    socket.current
-      ?.timeout(5000)
-      .emit('chat', { text: chat.trim() }, (err: Error | null, r: Reply) => {
-        if (err || !r.ok) notify(r?.error || 'Message failed.');
-        else setChat('');
-      });
+  const sendChat = useCallback(
+    (text: string, clientId: string) =>
+      new Promise<void>((resolve, reject) => {
+        const s = socket.current,
+          roomId = session.current?.roomId;
+        if (!s?.connected || !roomId) return reject(Error('Reconnect before sending a message.'));
+        s.timeout(5000).emit('chat', { text, clientId }, (err: Error | null, reply: Reply) => {
+          if (err || !reply?.ok)
+            return reject(Error(reply?.error || 'Message timed out. Retry to send it safely.'));
+          if (reply.message) receiveChat({ roomId, message: reply.message });
+          resolve();
+        });
+      }),
+    [receiveChat],
+  );
+  const openChat = () => {
+    setTab('chat');
+    requestAnimationFrame(() =>
+      chatPanel.current
+        ?.querySelector<HTMLTextAreaElement>('textarea')
+        ?.focus({ preventScroll: true }),
+    );
   };
   return (
     <div className="app">
@@ -584,10 +612,15 @@ export function WatchParty() {
                   <span className="status-dot" />
                   {connected && joined ? 'Room connected' : 'Reconnecting…'}
                 </span>
-                <span>
-                  <LockKeyhole size={12} />
-                  Just you and your people
-                </span>
+                <button
+                  className="player-chat-toggle"
+                  aria-controls="room-chat"
+                  aria-expanded={tab === 'chat'}
+                  onClick={() => (tab === 'chat' ? setTab('queue') : openChat())}
+                >
+                  <MessageCircle size={14} />
+                  {tab === 'chat' ? 'Hide chat' : 'Open chat'}
+                </button>
               </div>
               {state.videoId ? (
                 <YouTubePlayer
@@ -600,7 +633,9 @@ export function WatchParty() {
                   isHost={isHost}
                   onAction={action}
                   onDiagnostics={setDiag}
-                />
+                >
+                  <ChatNotifications items={chatNotifications} announce={tab !== 'chat'} />
+                </YouTubePlayer>
               ) : (
                 <div className="empty-player">
                   <div className="empty-disc">
@@ -620,6 +655,7 @@ export function WatchParty() {
                     <Plus size={16} />
                     Add your first video
                   </button>
+                  <ChatNotifications items={chatNotifications} announce={tab !== 'chat'} />
                 </div>
               )}
               <div className="transport">
@@ -842,15 +878,15 @@ export function WatchParty() {
               Different places. Same wavelength.<span>Space to play / pause · ← → to seek</span>
             </div>
           </section>
-          <aside className="sidebar">
+          <aside className={`sidebar ${tab === 'chat' ? 'chat-open' : ''}`} ref={chatPanel}>
             <div className="sidebar-tabs">
               <button className={tab === 'queue' ? 'active' : ''} onClick={() => setTab('queue')}>
                 <ListMusic size={18} />
                 Up next<span>{state.queue.length}</span>
               </button>
-              <button className={tab === 'chat' ? 'active' : ''} onClick={() => setTab('chat')}>
+              <button className={tab === 'chat' ? 'active' : ''} onClick={openChat}>
                 <MessageCircle size={17} />
-                Room chat<span>{state.messages.length}</span>
+                Room chat<span>{chatMessages.length}</span>
               </button>
             </div>
             {tab === 'queue' ? (
@@ -994,57 +1030,16 @@ export function WatchParty() {
                 </div>
               </>
             ) : (
-              <>
-                <div className="queue-intro">
-                  <h2>The conversation between songs.</h2>
-                  <p>Say it here. Keep the moment going.</p>
-                </div>
-                <div className="chat-messages" aria-live="polite">
-                  {!state.messages.length && (
-                    <div className="empty-queue">
-                      <MessageCircle size={28} />
-                      <h3>Say the first hello.</h3>
-                      <p>Good music starts conversations.</p>
-                    </div>
-                  )}
-                  {state.messages.map((m) => (
-                    <div className="chat-message" key={m.id}>
-                      <span className="avatar color-0">{m.name[0].toUpperCase()}</span>
-                      <div>
-                        <strong>
-                          {m.name}
-                          <time>
-                            {new Date(m.at).toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </time>
-                        </strong>
-                        <p>{m.text}</p>
-                      </div>
-                    </div>
-                  ))}
-                  <div ref={chatEnd} />
-                </div>
-                <form className="chat-form" onSubmit={submitChat}>
-                  <input
-                    aria-label="Chat message"
-                    placeholder="Send a little hello…"
-                    maxLength={500}
-                    value={chat}
-                    onChange={(e) => setChat(e.target.value)}
-                    disabled={!joined}
-                  />
-                  <button
-                    className="icon-button"
-                    disabled={!chat.trim() || !joined}
-                    aria-label="Send message"
-                  >
-                    <Send size={18} />
-                  </button>
-                </form>
-                <small className="chat-hint">Be kind. You’re in good company.</small>
-              </>
+              <ChatPanel
+                key={state.id}
+                messages={chatMessages}
+                connected={connected && joined}
+                onSend={sendChat}
+                onClose={() => setTab('queue')}
+                preferences={chatPreferences}
+                onPreferences={updateChatPreferences}
+                onClear={clearChat}
+              />
             )}
           </aside>
         </main>

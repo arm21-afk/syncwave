@@ -4,6 +4,8 @@ import { z } from 'zod';
 import {
   createSchema,
   joinSchema,
+  chatSchema,
+  type Message,
   type ClientEvents,
   type ServerEvents,
   type Reply,
@@ -28,6 +30,8 @@ export function attachRealtime(
       cb(null, !!req.headers.origin && options.origins.includes(req.headers.origin)),
   });
   const limits = new Map<string, { at: number; count: number }>();
+  // Receipts are scoped to the room object and reclaimed with an expired room.
+  const chatReceipts = new WeakMap<Room, Map<string, Message>>();
   const allow = (key: string, max: number, window = 10000) => {
     const now = Date.now(),
       old = limits.get(key);
@@ -118,21 +122,31 @@ export function attachRealtime(
     socket.on('chat', (input, ack) =>
       guarded(ack, () => {
         if (!active) throw Error('Join a room first.');
-        if (!allow(`chat:${active.pid}`, 8)) throw Error('Chat is moving too fast.');
-        const { text } = z
-          .object({ text: z.string().trim().min(1).max(500) })
-          .strict()
-          .parse(input);
+        const { text, clientId } = chatSchema.parse(input);
         const { r, pid } = active;
-        r.state.messages.push({
+        if (!r.members.get(pid)?.sockets.has(socket.id)) throw Error('Join a room first.');
+        const receipts = chatReceipts.get(r) ?? new Map<string, Message>();
+        chatReceipts.set(r, receipts);
+        const key = clientId ? `${pid}:${clientId}` : undefined;
+        const duplicate = key ? receipts.get(key) : undefined;
+        if (duplicate) return { ok: true, roomId: r.state.id, message: duplicate };
+        if (!allow(`chat:${pid}`, 8)) throw Error('Chat is moving too fast.');
+        const message: Message = {
           id: crypto.randomUUID(),
           name: r.members.get(pid)!.name,
+          senderId: pid,
+          clientId,
           text,
           at: Date.now(),
-        });
+        };
+        r.state.messages.push(message);
         r.state.messages = r.state.messages.slice(-100);
-        publish(r);
-        return { ok: true };
+        if (key) receipts.set(key, message);
+        if (receipts.size > 512) receipts.delete(receipts.keys().next().value!);
+        // Chat never broadcasts/reconciles the playback state or changes its version/anchor.
+        io.to(r.state.id).emit('chat:message', { roomId: r.state.id, message });
+        options.onChange?.(r);
+        return { ok: true, roomId: r.state.id, message };
       }),
     );
     socket.on('reaction', (input) => {

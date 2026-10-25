@@ -60,6 +60,83 @@ async function setup(count = 2) {
   return { clients, states, command, roomId, join, rt };
 }
 describe('real WebSocket clients', () => {
+  it('isolates live chat, identifies senders, deduplicates retries, and leaves playback untouched', async () => {
+    const t = await setup(3);
+    const other = await new Promise<Reply>((resolve) =>
+      t.clients[2].emit('create', { name: 'Separate room' }, resolve),
+    );
+    await new Promise<Reply>((resolve) =>
+      t.clients[2].emit(
+        'join',
+        { roomId: other.roomId!, name: 'Other room', token: randomUUID() },
+        resolve,
+      ),
+    );
+    await expect.poll(() => t.states[0].participants.filter((p) => p.online).length).toBe(2);
+    await t.command(0, { type: 'add', videoId: 'abcdefghijk' });
+    await t.command(0, { type: 'play' });
+    await expect.poll(() => t.states[1].version).toBe(t.states[0].version);
+    const before = structuredClone(t.rt.rooms.get(t.roomId).state);
+    const received: string[][] = [[], [], []];
+    const stateEvents = [0, 0, 0];
+    t.clients.forEach((s, i) => {
+      s.on('chat:message', (data) => received[i].push(data.message.id));
+      s.on('state', () => stateEvents[i]++);
+    });
+    const id = randomUUID();
+    const first = await new Promise<Reply>((resolve) =>
+      t.clients[0].emit('chat', { text: 'Hello 💜\nTogether!', clientId: id }, resolve),
+    );
+    const duplicate = await new Promise<Reply>((resolve) =>
+      t.clients[0].emit('chat', { text: 'Hello 💜\nTogether!', clientId: id }, resolve),
+    );
+    expect(first.ok).toBe(true);
+    expect(first.message?.id).toBe(duplicate.message?.id);
+    expect(first.message?.name).toBe('Person 0');
+    expect(first.message?.senderId).toBe(before.hostId);
+    expect(first.message?.at).toBeGreaterThan(0);
+    await expect.poll(() => received[1].length).toBe(1);
+    expect(received.map((messages) => messages.length)).toEqual([1, 1, 0]);
+    expect(stateEvents).toEqual([0, 0, 0]);
+    const after = t.rt.rooms.get(t.roomId).state;
+    expect({ ...after, messages: [] }).toEqual({ ...before, messages: [] });
+    t.clients[1].disconnect();
+    await new Promise<Reply>((resolve) =>
+      t.clients[0].emit('chat', { text: 'Sent while you were offline' }, resolve),
+    );
+    t.clients[1].connect();
+    await new Promise<void>((resolve) => t.clients[1].once('connect', resolve));
+    const restored = await t.join(1);
+    expect(restored.state?.messages).toHaveLength(2);
+    expect(received[1]).toHaveLength(1);
+    const spoof = await new Promise<Reply>((resolve) =>
+      t.clients[0].emit('chat', { text: 'spoof', name: 'Host' } as { text: string }, resolve),
+    );
+    expect(spoof.ok).toBe(false);
+    await new Promise<void>((resolve) => t.clients[2].emit('leave', resolve));
+    const unauthorized = await new Promise<Reply>((resolve) =>
+      t.clients[2].emit('chat', { text: 'not joined' }, resolve),
+    );
+    expect(unauthorized.ok).toBe(false);
+  });
+  it('rejects empty/oversized/control-only messages and chat spam', async () => {
+    const t = await setup();
+    for (const text of ['', '   ', '\u0000', 'x'.repeat(501)]) {
+      const result = await new Promise<Reply>((resolve) =>
+        t.clients[0].emit('chat', { text }, resolve),
+      );
+      expect(result.ok).toBe(false);
+    }
+    const results: Reply[] = [];
+    for (let i = 0; i < 9; i++)
+      results.push(
+        await new Promise<Reply>((resolve) =>
+          t.clients[0].emit('chat', { text: `Message ${i}` }, resolve),
+        ),
+      );
+    expect(results.filter((r) => r.ok)).toHaveLength(8);
+    expect(results[8].error).toMatch(/too fast/);
+  });
   it('two clients converge through play/pause, seeks, switching, queue edits and reconnect', async () => {
     const t = await setup();
     for (const a of [

@@ -60,7 +60,33 @@ export type Action = Command extends infer C
   : never;
 export type Participant = { id: string; name: string; online: boolean };
 export type QueueItem = { id: string; videoId: string; title: string; addedBy: string };
-export type Message = { id: string; name: string; text: string; at: number; system?: boolean };
+export type Message = {
+  id: string;
+  name: string;
+  text: string;
+  at: number;
+  senderId?: string;
+  clientId?: string;
+  system?: boolean;
+};
+export type ChatEnvelope = { roomId: string; message: Message };
+export const chatSchema = z
+  .object({
+    clientId: z.string().uuid().optional(),
+    text: z
+      .string()
+      .max(500)
+      .transform((text) =>
+        Array.from(text.replace(/\r\n?/g, '\n'))
+          .filter((char) => {
+            const code = char.codePointAt(0)!;
+            return (code >= 32 && code !== 127) || char === '\n' || char === '\t';
+          })
+          .join(''),
+      )
+      .pipe(z.string().trim().min(1).max(500)),
+  })
+  .strict();
 export type RoomState = {
   id: string;
   name: string;
@@ -85,6 +111,7 @@ export type Reply = {
   state?: RoomState;
   participantId?: string;
   roomId?: string;
+  message?: Message;
 };
 export interface ClientEvents {
   create: (input: z.infer<typeof createSchema>, ack: (reply: Reply) => void) => void;
@@ -92,11 +119,12 @@ export interface ClientEvents {
   command: (input: Command, ack: (reply: Reply) => void) => void;
   refresh: (ack: (reply: Reply) => void) => void;
   clock: (ack: (time: number) => void) => void;
-  chat: (input: { text: string }, ack: (reply: Reply) => void) => void;
+  chat: (input: z.input<typeof chatSchema>, ack: (reply: Reply) => void) => void;
   reaction: (input: string) => void;
   leave: (ack: () => void) => void;
 }
 export interface ServerEvents {
   state: (state: RoomState) => void;
+  'chat:message': (data: ChatEnvelope) => void;
   reaction: (data: { emoji: string; name: string }) => void;
 }

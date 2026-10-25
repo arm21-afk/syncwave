@@ -1,5 +1,12 @@
 'use client';
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import type { Action, RoomState } from '../lib/protocol';
 import { correction, defaultSync, targetPosition } from '../lib/sync';
 export type PlayerHandle = {
@@ -57,6 +64,7 @@ export const YouTubePlayer = forwardRef<
     isHost: boolean;
     onAction: (a: Action) => void;
     onDiagnostics: (d: Diagnostics) => void;
+    children?: ReactNode;
   }
 >(function YouTubePlayer(props, ref) {
   const mount = useRef<HTMLDivElement>(null),
@@ -261,6 +269,7 @@ export const YouTubePlayer = forwardRef<
           <small>Your browser needs a click to enable sound.</small>
         </div>
       )}
+      {props.children}
     </div>
   );
 });

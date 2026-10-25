@@ -42,6 +42,22 @@ Default port is 3001 so this app can coexist with the original repository app on
 - Reconnect backoff with jitter; rejoin by a tab-scoped secret token; fresh state restoration; clock estimation; configurable tolerance and drift diagnostics.
 - In-memory development and optional PostgreSQL/Prisma room snapshots. No external services are represented as configured.
 
+## Room chat and player notifications
+
+Use **Open chat** above the video or the **Room chat** sidebar tab. Desktop chat sits alongside the player; on small screens it opens as a dismissible bottom panel. Enter sends a message, Shift+Enter inserts a newline, and emojis are supported. The composer displays connection, sending, and error states and retains failed drafts for retry. New messages follow the scroll only when you are near the bottom; otherwise a new-message button lets you return when ready.
+
+Incoming messages appear inside the player's bottom-right corner, above its controls. The overlay is pointer-transparent and remains part of the player in fullscreen. **Player notification settings** inside chat lets each participant disable overlays, show their own messages (off by default), or clear the visible and queued stack. Preferences are saved to this browser. Closing chat leaves notifications enabled. Notification sounds are not included.
+
+`lib/chat.ts` configures a 5-second lifetime, 250 ms fade, three visible cards and twenty waiting messages. Each waiting card gets a full lifetime when promoted. Overflow drops the oldest waiting message, never a currently visible card; the full chat is still retained in the room's latest 100 messages. Compact video frames clip the stack to the available area above player controls. Long overlay text is clamped, while the chat panel shows the complete message. Reduced-motion users get immediate, non-animated transitions.
+
+The existing `chat` send event now accepts an optional `clientId` UUID, with `chat:message` as the room-scoped live delivery event. The server assigns the message ID, participant identity, and timestamp, trims text, removes non-printing controls, caps messages at 500 characters, and enforces 8 sends per participant per 10 seconds. Recent retry receipts (512 per room) prevent duplicate broadcasts after an acknowledgement timeout. Unknown fields and unauthorized senders are rejected. React renders text rather than HTML.
+
+History is supplied by the existing join/reconnect snapshot. `components/useRoomChat.ts` seeds that history silently, then separately deduplicates live message IDs and manages notification timers. Room IDs are checked before accepting a message; leaving/changing rooms clears the feed. Chat publishes no playback-state events and does not alter the playback version or time anchor. Refresh the app after deployment so all participants use the new delivery protocol. Memory-only chat history disappears when the free server restarts.
+
+To test: join the same room in two browsers with different names, add a video and play it, open chat in A and send a message. B should show a temporary notification while playback continues. Open B's chat to read the history, disable overlays and send another message, then re-enable them. Send several messages rapidly to see the stack queue. Refresh/rejoin B: history should return without replaying notifications. Scroll upward in a longer conversation and check incoming messages do not move your reading position.
+
+`tests/chat.test.ts` covers notification lifecycle and validation. WebSocket integration tests cover isolation, spoof rejection, retries, reconnect history, spam limits and unchanged playback state. `tests/browser/chat.spec.ts` covers player-relative placement, timed expiry/queuing, settings, multiline input, refresh, scroll preservation, mobile sizing and shared playback. Browser tests default to an isolated local server on port 3101. Set `PLAYWRIGHT_BASE_URL` to a deployed HTTPS origin to test that deployment instead.
+
 ## Synchronization architecture
 
 `lib/protocol.ts` defines shared events and Zod command schemas. `server/rooms.ts` owns each room's single authoritative state. `server/realtime.ts` validates/rate-limits messages, binds the authenticated socket membership, and broadcasts accepted state immediately. `components/YouTubePlayer.tsx` adapts the official player; `lib/sync.ts` owns time projection and correction policy.
