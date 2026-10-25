@@ -13,7 +13,7 @@ export type PlayerHandle = {
   current: () => number;
   duration: () => number;
   join: () => void;
-  fullscreen: () => void;
+  fullscreen: () => Promise<void>;
   volume: (n: number) => void;
 };
 export type Diagnostics = {
@@ -91,8 +91,13 @@ export const YouTubePlayer = forwardRef<
         player.current?.playVideo();
         reconcile.current(true);
       },
-      fullscreen: () => {
-        void shell.current?.requestFullscreen().catch(() => {});
+      fullscreen: async () => {
+        // Fullscreen the common ancestor, never the cross-origin video iframe alone.
+        const frame = shell.current?.closest<HTMLElement>('.screen-frame') ?? shell.current;
+        if (!frame) return;
+        if (document.fullscreenElement === frame) await document.exitFullscreen();
+        else if (frame.requestFullscreen) await frame.requestFullscreen();
+        else throw Error('Fullscreen is not supported in this browser.');
       },
       volume: (n) => player.current?.setVolume(n),
     }),
@@ -110,11 +115,21 @@ export const YouTubePlayer = forwardRef<
         const p = new YT.Player(node, {
           width: '100%',
           height: '100%',
-          playerVars: { playsinline: 1, controls: 1, rel: 0, origin: location.origin },
+          playerVars: { playsinline: 1, controls: 1, rel: 0, fs: 0, origin: location.origin },
           events: {
             onReady: () => {
               if (disposed) return;
               deviceReady = true;
+              // Also prevent iframe-only keyboard fullscreen from excluding our overlays.
+              const iframe = p.getIframe?.();
+              if (iframe) {
+                iframe.allowFullscreen = false;
+                iframe.allow =
+                  (iframe.allow || '')
+                    .split(';')
+                    .filter((rule) => !rule.trim().startsWith('fullscreen'))
+                    .join(';') + "; fullscreen 'none'";
+              }
               setReady(true);
               reconcile.current(true);
             },

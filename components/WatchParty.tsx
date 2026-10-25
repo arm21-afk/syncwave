@@ -10,6 +10,7 @@ import {
   Crown,
   Disc3,
   Expand,
+  Minimize,
   Headphones,
   Link,
   ListMusic,
@@ -100,6 +101,7 @@ export function WatchParty() {
     [offset, setOffset] = useState(0),
     [rtt, setRtt] = useState(0),
     [volume, setVolume] = useState(75),
+    [isFullscreen, setIsFullscreen] = useState(false),
     [diag, setDiag] = useState<Diagnostics>({
       drift: 0,
       corrections: 0,
@@ -132,6 +134,12 @@ export function WatchParty() {
     }
   }, []);
   const notify = useCallback((text: string) => setToast(text), []);
+  useEffect(() => {
+    const change = () =>
+      setIsFullscreen(!!document.fullscreenElement?.classList.contains('screen-frame'));
+    document.addEventListener('fullscreenchange', change);
+    return () => document.removeEventListener('fullscreenchange', change);
+  }, []);
   const join = useCallback(
     (data: Session) => {
       const s = socket.current;
@@ -621,6 +629,7 @@ export function WatchParty() {
                   <MessageCircle size={14} />
                   {tab === 'chat' ? 'Hide chat' : 'Open chat'}
                 </button>
+                {isFullscreen && <span>Exit fullscreen to open chat</span>}
               </div>
               {state.videoId ? (
                 <YouTubePlayer
@@ -729,10 +738,20 @@ export function WatchParty() {
                   </select>
                   <button
                     className="icon-button"
-                    aria-label="Fullscreen"
-                    onClick={() => player.current?.fullscreen()}
+                    aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+                    title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen with floating chat'}
+                    disabled={!state.videoId}
+                    onClick={() => {
+                      void player.current
+                        ?.fullscreen()
+                        .catch(() =>
+                          notify(
+                            'This browser could not enter fullscreen. Try opening SyncWave directly in a supported browser.',
+                          ),
+                        );
+                    }}
                   >
-                    <Expand size={18} />
+                    {isFullscreen ? <Minimize size={18} /> : <Expand size={18} />}
                   </button>
                 </div>
               </div>

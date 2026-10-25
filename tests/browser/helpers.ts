@@ -5,6 +5,7 @@ export async function mockYouTube(context: BrowserContext, partialMetadata = fal
   );
   await context.addInitScript((partialMetadata) => {
     type Opts = {
+      playerVars: { fs?: number };
       events: {
         onReady: () => void;
         onStateChange: (e: { data: number }) => void;
@@ -24,6 +25,7 @@ export async function mockYouTube(context: BrowserContext, partialMetadata = fal
         this.opts = opts;
         node.textContent = 'YouTube player (deterministic test adapter)';
         node.style.padding = '40px';
+        node.dataset.iframeFullscreen = String(opts.playerVars.fs);
         setTimeout(
           () => {
             this.readyAt = Date.now();

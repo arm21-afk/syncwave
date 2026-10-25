@@ -40,6 +40,54 @@ async function send(page: Page, text: string) {
 const overlays = (page: Page) =>
   page.getByRole('region', { name: 'Player chat notifications', exact: true });
 
+test('fullscreen includes incoming chat and playback controls without remounting the video', async ({
+  browser,
+}) => {
+  const t = await room(browser);
+  try {
+    await t.host.getByRole('button', { name: 'Play', exact: true }).click();
+    await expect(t.friend.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+    await expect(t.friend.locator('[data-iframe-fullscreen]')).toHaveAttribute(
+      'data-iframe-fullscreen',
+      '0',
+    );
+    await t.friend.getByRole('button', { name: 'Fullscreen', exact: true }).click();
+    await expect
+      .poll(() => t.friend.evaluate(() => document.fullscreenElement?.className))
+      .toBe('screen-frame');
+    await expect(
+      t.friend.getByRole('button', { name: 'Exit fullscreen', exact: true }),
+    ).toBeVisible();
+    await send(t.host, 'Hello in fullscreen 💜');
+    await expect(overlays(t.friend)).toContainText('Hello in fullscreen 💜');
+    expect(
+      await overlays(t.friend).evaluate((el) => document.fullscreenElement?.contains(el)),
+    ).toBe(true);
+    const fullscreenBounds = await t.friend.locator('.screen-frame').boundingBox();
+    const card = await overlays(t.friend).locator('article').boundingBox();
+    expect(card!.x + card!.width).toBeLessThanOrEqual(fullscreenBounds!.width + 1);
+    expect(card!.y + card!.height).toBeLessThan(fullscreenBounds!.height - 60);
+    await t.friend.getByRole('button', { name: 'Pause', exact: true }).click();
+    await expect(t.host.getByRole('button', { name: 'Play', exact: true })).toBeVisible();
+    const position = Number(await t.friend.getByLabel('Seek position').inputValue());
+    await t.friend.getByRole('button', { name: 'Exit fullscreen', exact: true }).click();
+    await expect.poll(() => t.friend.evaluate(() => document.fullscreenElement)).toBeNull();
+    await expect(t.friend.getByRole('button', { name: 'Fullscreen', exact: true })).toBeVisible();
+    expect(Number(await t.friend.getByLabel('Seek position').inputValue())).toBeGreaterThanOrEqual(
+      position - 1,
+    );
+    // Repeated entry and browser-initiated exit restore the correct control state.
+    await t.friend.getByRole('button', { name: 'Fullscreen', exact: true }).click();
+    await expect
+      .poll(() => t.friend.evaluate(() => document.fullscreenElement?.className))
+      .toBe('screen-frame');
+    await t.friend.evaluate(() => document.exitFullscreen());
+    await expect(t.friend.getByRole('button', { name: 'Fullscreen', exact: true })).toBeVisible();
+  } finally {
+    await t.close();
+  }
+});
+
 test('incoming messages overlay the player, queue without replacing, and expire', async ({
   browser,
 }) => {
