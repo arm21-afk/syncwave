@@ -45,7 +45,19 @@ test('two browsers create, join, synchronize controls and chat', async ({ browse
   await expect(second.getByRole('heading', { name: 'Together — test video' })).toBeVisible();
   await first.getByRole('button', { name: 'Play', exact: true }).click();
   await expect(second.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
-  await second.getByLabel('Seek position').fill('150');
+  const seek = second.getByLabel('Seek position');
+  await expect(seek).toBeEnabled();
+  await expect(seek).toHaveAttribute('max', '300');
+  const seekBounds = await seek.boundingBox();
+  const frameBounds = await second.locator('.screen-frame').boundingBox();
+  expect(seekBounds!.height).toBeGreaterThanOrEqual(24);
+  expect(seekBounds!.y + seekBounds!.height).toBeLessThan(
+    frameBounds!.y + frameBounds!.height - 20,
+  );
+  await seek.click({ position: { x: seekBounds!.width / 2, y: seekBounds!.height / 2 } });
+  await expect
+    .poll(async () => Number(await first.getByLabel('Seek position').inputValue()))
+    .toBeGreaterThan(148);
   await second.getByRole('button', { name: 'Pause', exact: true }).click();
   await expect(first.getByRole('button', { name: 'Play', exact: true })).toBeVisible();
   await expect
@@ -62,6 +74,61 @@ test('two browsers create, join, synchronize controls and chat', async ({ browse
   ).toBeVisible();
   await b.close();
   await a.close();
+});
+
+test('room speed reaches late devices despite drift and rate-change buffering', async ({
+  browser,
+}) => {
+  const a = await browser.newContext(),
+    b = await browser.newContext();
+  await mockYouTube(a, true, true);
+  await mockYouTube(b, true, true);
+  const host = await a.newPage(),
+    friend = await b.newPage();
+  try {
+    await host.goto('/');
+    await host.getByRole('button', { name: 'Create a room', exact: true }).click();
+    await host.getByLabel('Your display name').fill('Speed host');
+    await host.getByRole('button', { name: 'Create room', exact: true }).click();
+    await host.getByLabel('YouTube URL').fill('abcdefghijk');
+    await host.getByRole('button', { name: 'Add to queue', exact: true }).click();
+    await host.getByRole('button', { name: 'Play', exact: true }).click();
+    await host.getByLabel('Playback speed').selectOption('1.5');
+    await expect(host.locator('[data-playback-rate]')).toHaveAttribute('data-playback-rate', '1.5');
+    await friend.goto(host.url());
+    await friend.getByLabel('Your display name').fill('Late friend');
+    await friend.getByRole('button', { name: 'Join room', exact: true }).click();
+    await expect(friend.getByLabel('Playback speed')).toHaveValue('1.5');
+    await expect(friend.locator('[data-playback-rate]')).toHaveAttribute(
+      'data-playback-rate',
+      '1.5',
+    );
+    // Let several sync intervals pass: no repeated correction seeks or accidental shared pause.
+    await expect(friend.getByRole('button', { name: 'Synced', exact: true })).toBeVisible();
+    const seekCount = Number(
+      await friend.locator('[data-seek-count]').getAttribute('data-seek-count'),
+    );
+    const position = Number(await friend.getByLabel('Seek position').inputValue());
+    await friend.waitForTimeout(6000);
+    expect(
+      Number(await friend.getByLabel('Seek position').inputValue()) - position,
+    ).toBeGreaterThan(6);
+    expect(
+      Number(await friend.locator('[data-seek-count]').getAttribute('data-seek-count')) - seekCount,
+    ).toBeLessThanOrEqual(1);
+    for (const rate of ['2', '0.75', '1']) {
+      await host.getByLabel('Playback speed').selectOption(rate);
+      await expect(friend.locator('[data-playback-rate]')).toHaveAttribute(
+        'data-playback-rate',
+        rate,
+      );
+      await expect(host.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+      await expect(friend.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+    }
+  } finally {
+    await a.close();
+    await b.close();
+  }
 });
 test('mobile lobby has no horizontal overflow and validates URL input', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });

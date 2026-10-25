@@ -650,6 +650,9 @@ button svg {
 .screen-frame:fullscreen .transport {
   background: transparent;
 }
+.screen-frame:fullscreen .player-chat-notifications {
+  bottom: 128px;
+}
 @keyframes fullscreen-controls-idle {
   to {
     opacity: 0;
@@ -1085,18 +1088,45 @@ button svg {
   padding: 5px;
   color: #bab0c6;
 }
+.player-controls {
+  padding-top: 6px;
+}
 .seek-bar {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 100%;
-  height: 3px !important;
+  display: block;
+  appearance: none;
+  width: calc(100% - 32px);
+  height: 24px;
   border: 0;
   padding: 0;
-  margin: 0;
+  margin: 0 16px;
+  background: transparent;
   accent-color: var(--purple);
   border-radius: 0;
   cursor: pointer;
+}
+.seek-bar::-webkit-slider-runnable-track {
+  height: 4px;
+  background: #746b85;
+  border-radius: 2px;
+}
+.seek-bar::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--purple);
+}
+.seek-bar::-moz-range-track {
+  height: 4px;
+  background: #746b85;
+}
+.seek-bar::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--purple);
 }
 .now-playing {
   padding: 23px 0 25px;

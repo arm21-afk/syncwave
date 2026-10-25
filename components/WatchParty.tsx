@@ -667,6 +667,19 @@ export function WatchParty() {
                 </div>
               )}
               <div className="player-controls">
+                {state.videoId && (
+                  <input
+                    className="seek-bar"
+                    aria-label="Seek position"
+                    type="range"
+                    min="0"
+                    max={diag.duration || 1}
+                    value={Math.min(diag.position, diag.duration || 1)}
+                    step="0.1"
+                    disabled={!canPlayback || !joined || !diag.duration}
+                    onChange={(e) => action({ type: 'seek', position: +e.target.value })}
+                  />
+                )}
                 <div className="transport">
                   <div className="transport-main">
                     <button
@@ -755,19 +768,6 @@ export function WatchParty() {
                     </button>
                   </div>
                 </div>
-                {state.videoId && (
-                  <input
-                    className="seek-bar"
-                    aria-label="Seek position"
-                    type="range"
-                    min="0"
-                    max={diag.duration || 1}
-                    value={Math.min(diag.position, diag.duration || 1)}
-                    step="0.1"
-                    disabled={!canPlayback || !joined || !diag.duration}
-                    onChange={(e) => action({ type: 'seek', position: +e.target.value })}
-                  />
-                )}
               </div>
             </div>
             <div className="now-playing">

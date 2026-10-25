@@ -180,15 +180,20 @@ export const YouTubePlayer = forwardRef<
           const rawRates = p.getAvailablePlaybackRates?.();
           const rates = Array.isArray(rawRates) ? rawRates : [1];
           const playbackRate = p.getPlaybackRate?.();
+          const rateMismatch =
+            Number.isFinite(playbackRate) && playbackRate !== s.rate && rates.includes(s.rate);
           // Infer an explicit seek from discontinuity of the observed player clock, never from network drift alone.
           const prior = previous.current,
             elapsed = prior ? (now - prior.at) / 1000 : 0;
           if (
             !force &&
+            !rateMismatch &&
             prior &&
             elapsed < 2 &&
             now > mutedUntil.current &&
-            Math.abs(pos - prior.position - (status === 1 ? elapsed * s.rate : 0)) > 1.6
+            Math.abs(
+              pos - prior.position - (status === 1 ? elapsed * (playbackRate || s.rate) : 0),
+            ) > 1.6
           ) {
             previous.current = { at: now, position: pos };
             latest.current.onAction({ type: 'seek', position: pos });
@@ -196,7 +201,13 @@ export const YouTubePlayer = forwardRef<
           }
           const drift = target - pos,
             decision = correction(drift, s.playing, s.rate, rates, tolerance);
-          if (
+          // Apply the room speed before drift correction. Waiting for small drift can
+          // strand a device at 1x, repeatedly seeking against a faster room clock.
+          if (rateMismatch) {
+            mutedUntil.current = now + 2000;
+            previous.current = null;
+            p.setPlaybackRate(s.rate);
+          } else if (
             (force && Math.abs(drift) > tolerance) ||
             (decision.kind === 'seek' && now - lastCorrection.current > defaultSync.cooldown)
           ) {
@@ -207,14 +218,6 @@ export const YouTubePlayer = forwardRef<
           } else if (decision.kind === 'rate' && decision.rate !== playbackRate) {
             mutedUntil.current = now + 1500;
             p.setPlaybackRate(decision.rate!);
-          } else if (
-            Math.abs(drift) < tolerance &&
-            Number.isFinite(playbackRate) &&
-            playbackRate !== s.rate &&
-            rates.includes(s.rate)
-          ) {
-            mutedUntil.current = now + 1500;
-            p.setPlaybackRate(s.rate);
           }
           if (s.playing && status !== YT.PlayerState.PLAYING) {
             mutedUntil.current = now + 1500;
