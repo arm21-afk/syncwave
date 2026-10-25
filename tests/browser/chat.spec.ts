@@ -58,6 +58,12 @@ test('fullscreen includes incoming chat and playback controls without remounting
     await expect(
       t.friend.getByRole('button', { name: 'Exit fullscreen', exact: true }),
     ).toBeVisible();
+    const frameBounds = await t.friend.locator('.screen-frame').boundingBox();
+    const videoBounds = await t.friend.locator('.player-shell').boundingBox();
+    expect(videoBounds).toEqual(frameBounds);
+    await expect(t.friend.locator('.screen-top')).toBeHidden();
+    await t.friend.mouse.move(frameBounds!.width / 2, frameBounds!.height / 2);
+    await expect(t.friend.locator('.player-controls')).toHaveCSS('opacity', '0', { timeout: 5000 });
     await send(t.host, 'Hello in fullscreen 💜');
     await expect(overlays(t.friend)).toContainText('Hello in fullscreen 💜');
     expect(
@@ -67,6 +73,9 @@ test('fullscreen includes incoming chat and playback controls without remounting
     const card = await overlays(t.friend).locator('article').boundingBox();
     expect(card!.x + card!.width).toBeLessThanOrEqual(fullscreenBounds!.width + 1);
     expect(card!.y + card!.height).toBeLessThan(fullscreenBounds!.height - 60);
+    // The bottom edge reveals controls without shrinking the video or hiding chat.
+    await t.friend.mouse.move(frameBounds!.width / 2, frameBounds!.height - 20);
+    await expect(t.friend.locator('.player-controls')).toHaveCSS('opacity', '1');
     await t.friend.getByRole('button', { name: 'Pause', exact: true }).click();
     await expect(t.host.getByRole('button', { name: 'Play', exact: true })).toBeVisible();
     const position = Number(await t.friend.getByLabel('Seek position').inputValue());

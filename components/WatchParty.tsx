@@ -629,7 +629,6 @@ export function WatchParty() {
                   <MessageCircle size={14} />
                   {tab === 'chat' ? 'Hide chat' : 'Open chat'}
                 </button>
-                {isFullscreen && <span>Exit fullscreen to open chat</span>}
               </div>
               {state.videoId ? (
                 <YouTubePlayer
@@ -667,107 +666,109 @@ export function WatchParty() {
                   <ChatNotifications items={chatNotifications} announce={tab !== 'chat'} />
                 </div>
               )}
-              <div className="transport">
-                <div className="transport-main">
-                  <button
-                    className="icon-button"
-                    disabled={
-                      !canVideo ||
-                      !joined ||
-                      state.queue.findIndex((q) => q.id === state.currentId) <= 0
-                    }
-                    onClick={() => action({ type: 'previous' })}
-                    aria-label="Previous video"
-                  >
-                    <SkipBack size={19} />
-                  </button>
-                  <button
-                    className="play-button"
-                    disabled={!canPlayback || !joined || !state.videoId}
-                    onClick={() => action({ type: state.playing ? 'pause' : 'play' })}
-                    aria-label={state.playing ? 'Pause' : 'Play'}
-                  >
-                    {state.playing ? (
-                      <Pause size={20} fill="currentColor" />
-                    ) : (
-                      <Play size={20} fill="currentColor" />
-                    )}
-                  </button>
-                  <button
-                    className="icon-button"
-                    disabled={
-                      !canVideo ||
-                      !joined ||
-                      state.queue.findIndex((q) => q.id === state.currentId) >=
-                        state.queue.length - 1
-                    }
-                    onClick={() => action({ type: 'next' })}
-                    aria-label="Next video"
-                  >
-                    <SkipForward size={19} />
-                  </button>
-                  <span className="timecode">
-                    {time(diag.position)}
-                    <span> / {diag.duration ? time(diag.duration) : '—:—'}</span>
-                  </span>
+              <div className="player-controls">
+                <div className="transport">
+                  <div className="transport-main">
+                    <button
+                      className="icon-button"
+                      disabled={
+                        !canVideo ||
+                        !joined ||
+                        state.queue.findIndex((q) => q.id === state.currentId) <= 0
+                      }
+                      onClick={() => action({ type: 'previous' })}
+                      aria-label="Previous video"
+                    >
+                      <SkipBack size={19} />
+                    </button>
+                    <button
+                      className="play-button"
+                      disabled={!canPlayback || !joined || !state.videoId}
+                      onClick={() => action({ type: state.playing ? 'pause' : 'play' })}
+                      aria-label={state.playing ? 'Pause' : 'Play'}
+                    >
+                      {state.playing ? (
+                        <Pause size={20} fill="currentColor" />
+                      ) : (
+                        <Play size={20} fill="currentColor" />
+                      )}
+                    </button>
+                    <button
+                      className="icon-button"
+                      disabled={
+                        !canVideo ||
+                        !joined ||
+                        state.queue.findIndex((q) => q.id === state.currentId) >=
+                          state.queue.length - 1
+                      }
+                      onClick={() => action({ type: 'next' })}
+                      aria-label="Next video"
+                    >
+                      <SkipForward size={19} />
+                    </button>
+                    <span className="timecode">
+                      {time(diag.position)}
+                      <span> / {diag.duration ? time(diag.duration) : '—:—'}</span>
+                    </span>
+                  </div>
+                  <div className="transport-end">
+                    <Volume2 size={17} />
+                    <input
+                      aria-label="Volume"
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={volume}
+                      onChange={(e) => {
+                        setVolume(+e.target.value);
+                        player.current?.volume(+e.target.value);
+                      }}
+                    />
+                    <select
+                      aria-label="Playback speed"
+                      value={state.rate}
+                      disabled={!canPlayback || !joined}
+                      onChange={(e) => action({ type: 'rate', rate: +e.target.value as 1 })}
+                    >
+                      {[0.5, 0.75, 1, 1.25, 1.5, 2].map((r) => (
+                        <option key={r} value={r}>
+                          {r}×
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      className="icon-button"
+                      aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+                      title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen with floating chat'}
+                      disabled={!state.videoId}
+                      onClick={() => {
+                        void player.current
+                          ?.fullscreen()
+                          .catch(() =>
+                            notify(
+                              'This browser could not enter fullscreen. Try opening SyncWave directly in a supported browser.',
+                            ),
+                          );
+                      }}
+                    >
+                      {isFullscreen ? <Minimize size={18} /> : <Expand size={18} />}
+                    </button>
+                  </div>
                 </div>
-                <div className="transport-end">
-                  <Volume2 size={17} />
+                {state.videoId && (
                   <input
-                    aria-label="Volume"
+                    className="seek-bar"
+                    aria-label="Seek position"
                     type="range"
                     min="0"
-                    max="100"
-                    value={volume}
-                    onChange={(e) => {
-                      setVolume(+e.target.value);
-                      player.current?.volume(+e.target.value);
-                    }}
+                    max={diag.duration || 1}
+                    value={Math.min(diag.position, diag.duration || 1)}
+                    step="0.1"
+                    disabled={!canPlayback || !joined || !diag.duration}
+                    onChange={(e) => action({ type: 'seek', position: +e.target.value })}
                   />
-                  <select
-                    aria-label="Playback speed"
-                    value={state.rate}
-                    disabled={!canPlayback || !joined}
-                    onChange={(e) => action({ type: 'rate', rate: +e.target.value as 1 })}
-                  >
-                    {[0.5, 0.75, 1, 1.25, 1.5, 2].map((r) => (
-                      <option key={r} value={r}>
-                        {r}×
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    className="icon-button"
-                    aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-                    title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen with floating chat'}
-                    disabled={!state.videoId}
-                    onClick={() => {
-                      void player.current
-                        ?.fullscreen()
-                        .catch(() =>
-                          notify(
-                            'This browser could not enter fullscreen. Try opening SyncWave directly in a supported browser.',
-                          ),
-                        );
-                    }}
-                  >
-                    {isFullscreen ? <Minimize size={18} /> : <Expand size={18} />}
-                  </button>
-                </div>
+                )}
               </div>
-              {state.videoId && (
-                <input
-                  className="seek-bar"
-                  aria-label="Seek position"
-                  type="range"
-                  min="0"
-                  max={diag.duration || 1}
-                  value={Math.min(diag.position, diag.duration || 1)}
-                  step="0.1"
-                  disabled={!canPlayback || !joined || !diag.duration}
-                  onChange={(e) => action({ type: 'seek', position: +e.target.value })}
-                />
-              )}
             </div>
             <div className="now-playing">
               <div>
