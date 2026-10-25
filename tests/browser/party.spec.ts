@@ -83,6 +83,22 @@ test('room speed reaches late devices despite drift and rate-change buffering', 
     b = await browser.newContext();
   await mockYouTube(a, true, true);
   await mockYouTube(b, true, true);
+  // Exercise a speed selection while the preceding Play command is in flight.
+  await a.routeWebSocket(/socket\.io/, (ws) => {
+    const server = ws.connectToServer();
+    let closed = false;
+    ws.onClose(() => {
+      closed = true;
+      server.close();
+    });
+    server.onMessage((message) => {
+      if (typeof message === 'string' && message.startsWith('43')) {
+        setTimeout(() => {
+          if (!closed) ws.send(message);
+        }, 350);
+      } else ws.send(message);
+    });
+  });
   const host = await a.newPage(),
     friend = await b.newPage();
   try {

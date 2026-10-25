@@ -111,7 +111,8 @@ export function WatchParty() {
     }),
     [titles, setTitles] = useState<Record<string, string>>({}),
     [reaction, setReaction] = useState('');
-  const pending = useRef(false),
+  const pending = useRef<string | null>(null),
+    queuedActions = useRef<Action[]>([]),
     chatPanel = useRef<HTMLElement>(null);
   const {
     messages: chatMessages,
@@ -204,7 +205,8 @@ export function WatchParty() {
     s.on('disconnect', () => {
       setConnected(false);
       setJoined(false);
-      pending.current = false;
+      pending.current = null;
+      queuedActions.current = [];
       clearChat();
     });
     s.on('connect_error', () =>
@@ -264,22 +266,36 @@ export function WatchParty() {
     };
   }, [state?.queue, titles]);
   const action = useCallback(
-    (a: Action) => {
+    function dispatch(a: Action) {
       const s = socket.current,
         current = stateRef.current;
-      if (!s?.connected || !current || pending.current) return;
-      pending.current = true;
+      if (!s?.connected || !current) return;
+      if (pending.current) {
+        const tail = queuedActions.current.at(-1);
+        if ((a.type === 'rate' || a.type === 'seek') && tail?.type === a.type)
+          queuedActions.current[queuedActions.current.length - 1] = a;
+        else if (queuedActions.current.length < 16) queuedActions.current.push(a);
+        else notify('Playback controls are busy. Please try again in a moment.');
+        return;
+      }
+      const commandId = crypto.randomUUID();
+      pending.current = commandId;
       s.timeout(5000).emit(
         'command',
-        { ...a, id: crypto.randomUUID(), baseVersion: current.version },
+        { ...a, id: commandId, baseVersion: current.version },
         (err: Error | null, reply: Reply) => {
-          pending.current = false;
+          if (pending.current !== commandId) return;
+          pending.current = null;
           if (reply?.state) accept(reply.state);
           if (err || !reply?.ok) {
+            queuedActions.current = [];
             notify(reply?.error || 'Command timed out. Reconnecting to room state…');
             s.emit('refresh', (r) => {
               if (r.state) accept(r.state);
             });
+          } else if (stateRef.current?.id === current.id) {
+            const next = queuedActions.current.shift();
+            if (next) dispatch(next);
           }
         },
       );
@@ -374,6 +390,8 @@ export function WatchParty() {
     }
   };
   const leave = () => {
+    pending.current = null;
+    queuedActions.current = [];
     socket.current?.emit('leave', () => {});
     session.current = null;
     targetRoom.current = null;
